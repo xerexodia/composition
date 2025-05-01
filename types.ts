@@ -71,7 +71,7 @@ export type GroupLayer = BaseLayerProperties & {
   children: string[];
 };
 
-export type Layer = RectangleLayer | TextLayer | GroupLayer | EllipseLayer;
+export type Layer = RectangleLayer | TextLayer | GroupLayer | EllipseLayer | PathLayer;
 
 export type Document = {
   id: string;

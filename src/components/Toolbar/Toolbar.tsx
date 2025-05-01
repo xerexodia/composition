@@ -4,6 +4,7 @@ import SelectionBtn from "./SelectionBtn";
 import ShapeBtn from "./ShapeBtn";
 import ZoomInBtn from "./ZoomInBtn";
 import ZoomOutBtn from "./ZoomOutBtn";
+import PencilBtn from "./PencilBtn";
 
 const Toolbar = ({
   canvaState,
@@ -21,7 +22,7 @@ const Toolbar = ({
   canZoomOut: boolean;
 }) => {
   return (
-    <div className="fixed bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center justify-center bg-white p-1 shadow-[0_0_10px] rounded-md">
+    <div className="fixed bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center justify-center bg-white p-1 shadow-[0_0_10px] rounded-md px-2">
       <div className="flex justify-center items-center gap-3">
         <SelectionBtn
           isActive={
@@ -47,11 +48,17 @@ const Toolbar = ({
             setCanvasState({ mode: CanvasMode.Inserting, layer: arg })
           }
         />
-      <div className="w-[1px] self-stretch bg-black/10" />
-      <div className="flex items-center justify-center gap-3">
-        <ZoomInBtn onClick={zoomIn} disabled={!canZoomIn} />
-        <ZoomOutBtn onClick={zoomOut} disabled={!canZoomOut} />
-      </div>
+        <PencilBtn
+          onClick={() => {
+            setCanvasState({ mode: CanvasMode.Pencil });
+          }}
+          isActive={canvaState.mode === CanvasMode.Pencil}
+        />
+        <div className="w-[1px] self-stretch bg-black/10" />
+        <div className="flex items-center justify-center gap-3">
+          <ZoomInBtn onClick={zoomIn} disabled={!canZoomIn} />
+          <ZoomOutBtn onClick={zoomOut} disabled={!canZoomOut} />
+        </div>
       </div>
     </div>
   );

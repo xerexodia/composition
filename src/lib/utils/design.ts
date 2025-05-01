@@ -3,13 +3,14 @@ import {
   LayerType,
   PathLayer,
   RGBAColor,
+  Vector2D,
   ZoomableVector2D,
 } from "../../../types";
 
 export const pointerEventToCanvasPoint = (
   e: React.PointerEvent,
   camera: ZoomableVector2D
-) => {
+): Vector2D => {
   return {
     x: Math.round(e.clientX) - camera.x,
     y: Math.round(e.clientY) - camera.y,
@@ -18,7 +19,8 @@ export const pointerEventToCanvasPoint = (
 
 export const penPointsToPathLayer = (
   points: number[][],
-  color: RGBAColor
+  color: RGBAColor,
+  zoom: number
 ): PathLayer => {
   let left = Number.POSITIVE_INFINITY;
   let top = Number.POSITIVE_INFINITY;
@@ -56,12 +58,29 @@ export const penPointsToPathLayer = (
     locked: false,
     type: LayerType.Path,
     visible: true,
-    x: left,
-    y: top,
+    x: left / zoom,
+    y: top / zoom,
     name: id,
     stroke: {
       color,
       width: 1,
     },
   };
+};
+
+export const getSvgPathFromStroke = (stroke: number[][]) => {
+  if (!stroke.length) return "";
+  const d = stroke.reduce(
+    (acc, [x0, y0], i, arr) => {
+      const nextPoint = arr[(i + 1) % arr.length];
+      if (!nextPoint) return acc;
+      const [x1, y1] = nextPoint;
+      acc.push(x0!, y0!, (x0! + x1!) / 2, (y0! + y1!) / 2);
+      return acc;
+    },
+    ["M", ...stroke[0], "Q"]
+  );
+
+  d.push("Z");
+  return d.join(" ");
 };

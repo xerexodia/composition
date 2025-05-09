@@ -1,91 +1,46 @@
 "use client";
-import { rgbaToHex } from "@/lib/utils/strings";
-import React, { useMemo } from "react";
-import LayerComponent from "../LayerComponent/LayerComponent";
-import useCanvas from "./useCanvas";
+import { useDesignStore } from "@/lib/useDesignStore";
+import React, { useRef } from "react";
+import { useCanvas } from "./useCanvas";
+import { useResizeObserver } from "@/hooks/useResizeObserver";
 import Toolbar from "../Toolbar/Toolbar";
-import Path from "../Elements/Path";
 
-const Canvas = () => {
+export const Canvas = () => {
+  const { currentDocument, camera } = useDesignStore();
   const {
-    currentDocument,
-    onPointerUp,
-    canvasState,
-    setCanvasState,
-    camera,
-    setCamera,
-    onWheel,
-    onPointerDown,
-    onPointerMove,
-    pencilDraft,
+    handlePointerDown,
+    handlePointerMove,
+    handlePointerUp,
+    handleWheel,
+    canvasRef,
+    containerRef,
   } = useCanvas();
 
-  const backgroundColor = useMemo(
-    () => (currentDocument ? rgbaToHex(currentDocument.bgColor) : "#fff"),
-    [currentDocument?.bgColor]
-  );
-
-  const transformStyle = useMemo(
-    () => ({
-      transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})`,
-    }),
-    [camera.x, camera.y, camera.zoom]
-  );
-
-  const layers = useMemo(
-    () =>
-      currentDocument?.rootLayerIds?.map((id) => (
-        <LayerComponent key={id} id={id} />
-      )),
-    [currentDocument?.rootLayerIds]
-  );
+  // useResizeObserver(containerRef, (entries) => {
+  //   const entry = entries[0];
+  //   if (entry && canvasRef.current) {
+  //     canvasRef.current.width = entry.contentRect.width;
+  //     canvasRef.current.height = entry.contentRect.height;
+  //   }
+  // });
 
   return (
-    <div className="flex h-screen w-full">
-      <main className="overflow-y-auto fixed left-0 right-0 h-screen">
-        <div style={{ backgroundColor }} className="h-full w-full touch-none">
-          <svg
-            onWheel={onWheel}
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            className="w-full h-full"
-          >
-            <g style={transformStyle}>{layers}</g>
-            {pencilDraft !== null && pencilDraft.length > 0 && (
-              <Path
-                x={0}
-                y={0}
-                fill={{
-                  b: 233,
-                  g: 233,
-                  r: 233,
-                }}
-                points={pencilDraft}
-                stroke={{
-                  color: {
-                    b: 233,
-                    g: 233,
-                    r: 233,
-                  },
-                  width: 1,
-                }}
-              />
-            )}
-          </svg>
-        </div>
-      </main>
-
-      <Toolbar
-        canvaState={canvasState}
-        setCanvasState={setCanvasState}
-        canZoomIn={camera.zoom < 2}
-        canZoomOut={camera.zoom > 0.5}
-        zoomIn={() => setCamera((cam) => ({ ...cam, zoom: cam.zoom + 0.1 }))}
-        zoomOut={() => setCamera((cam) => ({ ...cam, zoom: cam.zoom - 0.1 }))}
+    <div
+      ref={containerRef}
+      className="flex relative w-full h-screen overflow-hidden items-center justify-center"
+    >
+      <canvas
+        style={{ touchAction: "none" }}
+        ref={canvasRef}
+        className="absolute left-0 top-0 w-full h-full"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={handlePointerUp}
+        onWheel={handleWheel}
       />
+
+      <Toolbar />
     </div>
   );
 };
-
-export default React.memo(Canvas);

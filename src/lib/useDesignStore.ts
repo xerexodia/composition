@@ -1,181 +1,52 @@
-import { useState, useCallback, useMemo } from "react";
-import { designStore } from "./store";
-import { Layer, AppTool, Vector2D } from "../../types";
+import { useEffect, useState, useMemo } from 'react';
+import { designStore } from './store';
 
-export const useDesignStore = () => {
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
+export function useDesignStore() {
+  const [state, setState] = useState(designStore.getState());
 
-  const stableDesignStore = useMemo(() => designStore, []);
+  useEffect(() => {
+    const unsubscribe = designStore.subscribe(setState);
+    return unsubscribe;
+  }, []);
 
-  const loadDocument = useCallback(
-    async (documentId: string) => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        await stableDesignStore.loadDocument(documentId);
-      } catch (err) {
-        setError(
-          err instanceof Error ? err : new Error("Failed to load document")
-        );
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [stableDesignStore]
-  );
+  const actions = useMemo(() => ({
+    // Document actions
+    createDocument: designStore.createDocument.bind(designStore),
+    loadDocument: designStore.loadDocument.bind(designStore),
+    saveDocument: designStore.saveDocument.bind(designStore),
+    
+    // Selection & Tool
+    setTool: designStore.setTool.bind(designStore),
+    setSelection: designStore.setSelection.bind(designStore),
+    
+    // Canvas Interactions
+    startInserting: designStore.startInserting.bind(designStore),
+    updateInserting: designStore.updateInserting.bind(designStore),
+    completeInserting: designStore.completeInserting.bind(designStore),
+    startDragging: designStore.startDragging.bind(designStore),
+    updateDragging: designStore.updateDragging.bind(designStore),
+    completeDragging: designStore.completeDragging.bind(designStore),
+    startResizing: designStore.startResizing.bind(designStore),
+    updateResizing: designStore.updateResizing.bind(designStore),
+    completeResizing: designStore.completeResizing.bind(designStore),
+    
+    // Viewport
+    panCamera: designStore.panCamera.bind(designStore),
+    zoomCamera: designStore.zoomCamera.bind(designStore),
+    screenToWorld: designStore.screenToWorld.bind(designStore),
+    worldToScreen: designStore.worldToScreen.bind(designStore),
+    
+    // Undo/Redo
+    undo: designStore.undo.bind(designStore),
+    redo: designStore.redo.bind(designStore),
+    canUndo: designStore.canUndo.bind(designStore),
+    canRedo: designStore.canRedo.bind(designStore),
+    
+    // Preferences
+    toggleDarkMode: designStore.toggleDarkMode.bind(designStore),
+    setNudgeDistance: designStore.setNudgeDistance.bind(designStore),
+    toggleRulers: designStore.toggleRulers.bind(designStore),
+  }), []);
 
-  const getLayerById = useCallback(
-    (id: string): Layer | undefined => {
-      return designStore.getState()?.currentDocument?.layers[id];
-    },
-    [designStore.getState()?.currentDocument]
-  );
-
-  const createDocument = useCallback(
-    async (name: string) => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        return await stableDesignStore.createDocument(name);
-      } catch (err) {
-        setError(
-          err instanceof Error ? err : new Error("Failed to create document")
-        );
-        throw err;
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [stableDesignStore]
-  );
-
-  const addLayer = useCallback(
-    async (layer: Layer, parentId?: string | null) => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        await stableDesignStore.addLayer(layer, parentId ?? null);
-      } catch (err) {
-        setError(err instanceof Error ? err : new Error("Failed to add layer"));
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [stableDesignStore]
-  );
-
-  const deleteSelectedLayers = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      await stableDesignStore.deleteSelectedLayers();
-    } catch (err) {
-      setError(
-        err instanceof Error ? err : new Error("Failed to delete layers")
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  }, [stableDesignStore]);
-
-  const moveSelectedLayers = useCallback(
-    async (delta: Vector2D) => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        await stableDesignStore.moveSelectedLayers(delta);
-      } catch (err) {
-        setError(
-          err instanceof Error ? err : new Error("Failed to move layers")
-        );
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [stableDesignStore]
-  );
-
-  const selectLayers = useCallback(
-    (ids: string[]) => {
-      stableDesignStore.selectLayers(ids);
-    },
-    [stableDesignStore]
-  );
-
-  const setTool = useCallback(
-    (tool: AppTool) => {
-      stableDesignStore.setTool(tool);
-    },
-    [stableDesignStore]
-  );
-
-  const undo = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      await stableDesignStore.undo();
-    } catch (err) {
-      setError(err instanceof Error ? err : new Error("Failed to undo"));
-    } finally {
-      setIsLoading(false);
-    }
-  }, [stableDesignStore]);
-
-  const redo = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      await stableDesignStore.redo();
-    } catch (err) {
-      setError(err instanceof Error ? err : new Error("Failed to redo"));
-    } finally {
-      setIsLoading(false);
-    }
-  }, [stableDesignStore]);
-
-  const actions = useMemo(
-    () => ({
-      loadDocument,
-      createDocument,
-      addLayer,
-      deleteSelectedLayers,
-      moveSelectedLayers,
-      selectLayers,
-      setTool,
-      undo,
-      redo,
-      getLayerById,
-    }),
-    [
-      loadDocument,
-      createDocument,
-      addLayer,
-      deleteSelectedLayers,
-      moveSelectedLayers,
-      selectLayers,
-      setTool,
-      undo,
-      redo,
-      getLayerById,
-    ]
-  );
-
-  const isLayerSelected = useCallback(
-    (id: string) => designStore.getState().selectedLayerIds.includes(id),
-    [designStore.getState().selectedLayerIds]
-  );
-
-  const canUndo = stableDesignStore.undoStack.length > 0;
-  const canRedo = stableDesignStore.redoStack.length > 0;
-
-  return {
-    ...designStore.getState(),
-    ...actions,
-    isLoading,
-    error,
-    isLayerSelected,
-    canUndo,
-    canRedo,
-  };
-};
+  return { ...state, ...actions };
+}

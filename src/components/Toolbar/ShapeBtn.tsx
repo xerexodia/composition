@@ -43,7 +43,8 @@ const ShapeBtn = ({
           <IoSquareOutline className="h-5 w-5" />
         )}
         {canvasState.mode === CanvasMode.Inserting &&
-          canvasState.layer === LayerType.Rectangle && (
+          (canvasState.layer === LayerType.Rectangle ||
+            canvasState.layer === LayerType.Text) && (
             <IoSquareOutline className="h-5 w-5" />
           )}
         {canvasState.mode === CanvasMode.Inserting &&
@@ -51,10 +52,10 @@ const ShapeBtn = ({
             <IoEllipseOutline className="h-5 w-5" />
           )}
       </IconBtn>
-      <button onClick={() => setIsOpen(!isOpen)} className="ml-1">
+      <button onClick={() => setIsOpen(!isOpen)} className="ml-[1px]">
         <svg
-          width="20"
-          height="20"
+          width="16"
+          height="16"
           fill="none"
           stroke="currentColor"
           strokeWidth="2"

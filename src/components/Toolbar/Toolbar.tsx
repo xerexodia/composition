@@ -1,63 +1,75 @@
+import { useDesignStore } from "@/lib/useDesignStore";
 import React from "react";
-import { CanvasMode, CanvasState, LayerType } from "../../../types";
 import SelectionBtn from "./SelectionBtn";
 import ShapeBtn from "./ShapeBtn";
+import { CanvasMode, LayerType } from "../../../types";
+import PencilBtn from "./PencilBtn";
+import TextBtn from "./TextBtn";
 import ZoomInBtn from "./ZoomInBtn";
 import ZoomOutBtn from "./ZoomOutBtn";
-import PencilBtn from "./PencilBtn";
 
-const Toolbar = ({
-  canvaState,
-  setCanvasState,
-  zoomIn,
-  zoomOut,
-  canZoomIn,
-  canZoomOut,
-}: {
-  canvaState: CanvasState;
-  setCanvasState: (newState: CanvasState) => void;
-  zoomIn: () => void;
-  zoomOut: () => void;
-  canZoomIn: boolean;
-  canZoomOut: boolean;
-}) => {
+const Toolbar = () => {
+  const { canvas, setTool, camera, preferences, zoomCamera } = useDesignStore();
+
+  const canZoomIn = camera.zoom < 3;
+  const canZoomOut = camera.zoom > 0.1;
+
   return (
-    <div className="fixed bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center justify-center bg-white p-1 shadow-[0_0_10px] rounded-md px-2">
+    <div
+      className={`fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 items-center justify-center p-1 shadow-[0_0_10px] rounded-md px-2 ${
+        preferences.darkMode ? "bg-gray-800" : "bg-white"
+      }`}
+    >
       <div className="flex justify-center items-center gap-3">
         <SelectionBtn
+          canvasMode={canvas.mode}
           isActive={
-            canvaState.mode === CanvasMode.None ||
-            canvaState.mode === CanvasMode.Dragging
+            canvas.mode === CanvasMode.None ||
+            canvas.mode === CanvasMode.Dragging
           }
-          canvasMode={canvaState.mode}
-          onClick={(arg) =>
-            setCanvasState(
-              arg === CanvasMode.Dragging
-                ? { mode: arg, origin: null }
-                : { mode: arg }
-            )
-          }
+          onClick={() => setTool("select")}
         />
+
         <ShapeBtn
+          canvasState={canvas}
           isActive={
-            canvaState.mode === CanvasMode.Inserting &&
-            [LayerType.Rectangle, LayerType.Ellipse].includes(canvaState.layer)
+            canvas.mode === CanvasMode.Inserting &&
+            [LayerType.Rectangle, LayerType.Ellipse].includes(canvas.layerType)
           }
-          canvasState={canvaState}
-          onClick={(arg) =>
-            setCanvasState({ mode: CanvasMode.Inserting, layer: arg })
-          }
-        />
-        <PencilBtn
-          onClick={() => {
-            setCanvasState({ mode: CanvasMode.Pencil });
+          onClick={(shapeType) => {
+            setTool(shapeType);
           }}
-          isActive={canvaState.mode === CanvasMode.Pencil}
         />
-        <div className="w-[1px] self-stretch bg-black/10" />
+
+        <PencilBtn
+          isActive={canvas.mode === CanvasMode.Pencil}
+          onClick={() => {
+            setTool("path");
+          }}
+        />
+
+        <TextBtn
+          isActive={canvas.mode === CanvasMode.Inserting}
+          onClick={() => {
+            setTool("text");
+          }}
+        />
+
+        <div
+          className={`w-[1px] self-stretch ${
+            preferences.darkMode ? "bg-white/20" : "bg-black/10"
+          }`}
+        />
+
         <div className="flex items-center justify-center gap-3">
-          <ZoomInBtn onClick={zoomIn} disabled={!canZoomIn} />
-          <ZoomOutBtn onClick={zoomOut} disabled={!canZoomOut} />
+          <ZoomInBtn
+            onClick={() => zoomCamera(camera.zoom + 0.1)}
+            disabled={!canZoomIn}
+          />
+          <ZoomOutBtn
+            onClick={() => zoomCamera(camera.zoom - 0.1)}
+            disabled={!canZoomOut}
+          />
         </div>
       </div>
     </div>

@@ -9,9 +9,9 @@ export default function Home() {
     <div className="h-screen w-full flex items-center justify-center">
       <button
         onClick={async () => {
-          const res = await createDocument("doc1");
-          if (res) {
-            navigate.push("/dashboard/" + res.id);
+          const id = await createDocument("doc1");
+          if (id) {
+            navigate.push("/dashboard/" + id);
           }
         }}
       >

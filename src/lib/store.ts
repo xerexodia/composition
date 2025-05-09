@@ -1,344 +1,415 @@
-import { Document, Layer, AppState, AppTool, Vector2D } from "../../types";
+// src/stores/design-store.ts
 import {
-  saveDocument,
-  loadDocument,
-  watchDocument,
-  saveHistory,
-  loadHistory,
-  getDB,
-  createDocument as dbCreateDocument,
-} from "./db";
-import {
-  applyPatches,
-  calculateInversePatches,
-  Patch,
-  createAddPatch,
-  createRemovePatch,
-  createReplacePatch,
-} from "./utils/patch-utils";
+  DesignDocument,
+  Layer,
+  CanvasMode,
+  AppTool,
+  Vector2D,
+  LayerType,
+  AppState,
+  ResizingPosition,
+} from "../../types";
+import { createDocument, getDocumentByID, saveDocument } from "./core/db";
+import { documentManager } from "./core/document-manager";
+import { generateDefaultLayer } from "./utils/design";
 
-type HistoryEntry = {
-  patches: Patch[];
-  inversePatches: Patch[];
-};
+type Subscriber = (state: AppState) => void;
+type Unsubscribe = () => void;
 
 class DesignStore {
-  private state: AppState;
-  private subscribers: Set<(state: AppState) => void> = new Set();
-  private _undoStack: HistoryEntry[] = [];
-  private _redoStack: HistoryEntry[] = [];
-  private currentDocumentId: string | null = null;
-  private unsubscribeFromUpdates: (() => void) | null = null;
+  private state: AppState = {
+    currentDocument: null,
+    selectedLayerIds: [],
+    camera: { x: 0, y: 0, zoom: 1 },
+    tool: "select",
+    canvas: { mode: CanvasMode.None },
+    preferences: {
+      darkMode: false,
+      nudgeDistance: 1,
+      showRulers: true,
+    },
+  };
+
+  private subscribers: Subscriber[] = [];
+  private renderScheduled = false;
 
   constructor() {
-    this.state = {
-      currentDocument: null,
-      selectedLayerIds: [],
-      camera: { x: 0, y: 0, zoom: 1 },
-      tool: "select",
-    };
+    this.setupDocumentListeners();
   }
 
-  get undoStack(): ReadonlyArray<HistoryEntry> {
-    return this._undoStack;
+  // ======================
+  // State Management
+  // ======================
+  private setState(partialState: Partial<AppState>) {
+    this.state = { ...this.state, ...partialState };
+    this.scheduleNotify();
   }
 
-  get redoStack(): ReadonlyArray<HistoryEntry> {
-    return this._redoStack;
-  }
-
-  async createDocument(name: string): Promise<Document> {
-    const doc = await dbCreateDocument(name);
-    return doc;
-  }
-
-  async loadDocument(documentId: string): Promise<void> {
-    if (this.unsubscribeFromUpdates) {
-      this.unsubscribeFromUpdates();
-    }
-
-    const doc = await loadDocument(documentId);
-    if (!doc) throw new Error("Document not found");
-
-    const history = await loadHistory(documentId);
-    this._undoStack = await Promise.all(
-      history.map(async (entry) => ({
-        patches: entry.patches,
-        inversePatches: calculateInversePatches(
-          await this.getDocumentAtVersion(documentId, entry.version - 1),
-          entry.patches
-        ),
-      }))
-    );
-
-    this.currentDocumentId = documentId;
-    this.state = {
-      ...this.state,
-      currentDocument: doc,
-      selectedLayerIds: [],
-    };
-    this._redoStack = [];
-
-    this.unsubscribeFromUpdates = watchDocument(documentId, (updatedDoc) => {
-      if (updatedDoc.version > (this.state.currentDocument?.version || 0)) {
-        this.state.currentDocument = updatedDoc;
+  private scheduleNotify() {
+    if (!this.renderScheduled) {
+      this.renderScheduled = true;
+      requestAnimationFrame(() => {
+        this.renderScheduled = false;
         this.notifySubscribers();
-      }
-    });
-
-    this.notifySubscribers();
+      });
+    }
   }
 
-  private async getDocumentAtVersion(
-    documentId: string,
-    version: number
-  ): Promise<Document> {
-    if (version === 0) {
-      const db = await getDB();
-      const doc = await db.get("documents", documentId);
-      if (!doc) throw new Error("Document not found");
-      return { ...doc, version: 0 };
-    }
-
-    const history = await loadHistory(documentId);
-    let doc = await this.getDocumentAtVersion(documentId, 0);
-
-    for (const entry of history) {
-      if (entry.version <= version) {
-        doc = applyPatches(doc, entry.patches);
-      } else {
-        break;
-      }
-    }
-
-    return doc;
+  private notifySubscribers() {
+    const currentState = this.getState();
+    this.subscribers.forEach((subscriber) => subscriber(currentState));
   }
 
-  async applyPatches(patches: Patch[], sourceTab = true): Promise<void> {
-    if (!this.state.currentDocument || !this.currentDocumentId) return;
-
-    const currentDoc = this.state.currentDocument;
-    const inversePatches = calculateInversePatches(currentDoc, patches);
-    const newDoc = applyPatches(currentDoc, patches);
-
-    this.state.currentDocument = {
-      ...newDoc,
-      version: currentDoc.version + 1,
-      updatedAt: new Date(),
+  private setupDocumentListeners() {
+    const originalLoad = documentManager.loadDocument.bind(documentManager);
+    documentManager.loadDocument = (doc: DesignDocument) => {
+      const result = originalLoad(doc);
+      this.setState({
+        currentDocument: doc,
+        selectedLayerIds: documentManager.getSelectedLayersId(),
+        canvas: { mode: CanvasMode.None },
+      });
+      return result;
     };
-
-    this._undoStack.push({ patches, inversePatches });
-    this._redoStack = [];
-
-    if (sourceTab) {
-      await saveDocument(this.state.currentDocument);
-      await saveHistory(
-        this.currentDocumentId,
-        this.state.currentDocument.version,
-        patches
-      );
-    }
-
-    this.notifySubscribers();
   }
 
-  async addLayer(layer: Layer, parentId: string | null = null): Promise<void> {
-    if (!this.state.currentDocument) return;
-
-    const patches: Patch[] = [createAddPatch(["layers", layer.id], layer)];
-
-    if (parentId) {
-      const parent = this.state.currentDocument.layers[parentId];
-      if (parent?.type === "group") {
-        const currentChildren = Array.isArray(parent.children)
-          ? parent.children
-          : [];
-        patches.push(
-          createReplacePatch(
-            ["layers", parentId, "children"],
-            [...currentChildren, layer.id],
-            currentChildren
-          )
-        );
-      }
-    } else {
-      const currentRootIds = Array.isArray(
-        this.state.currentDocument.rootLayerIds
-      )
-        ? this.state.currentDocument.rootLayerIds
-        : [];
-      patches.push(
-        createReplacePatch(
-          ["rootLayerIds"],
-          [...currentRootIds, layer.id],
-          currentRootIds
-        )
-      );
-    }
-
-    await this.applyPatches(patches);
-    this.selectLayers([layer.id]);
-  }
-
-  async deleteSelectedLayers(): Promise<void> {
-    if (!this.state.currentDocument || this.state.selectedLayerIds.length === 0)
-      return;
-
-    const patches: Patch[] = [];
-    const doc = this.state.currentDocument;
-
-    for (const layerId of this.state.selectedLayerIds) {
-      if (doc.layers[layerId]) {
-        patches.push(
-          createRemovePatch(["layers", layerId], doc.layers[layerId])
-        );
-
-        const rootIndex = doc.rootLayerIds.indexOf(layerId);
-        if (rootIndex !== -1) {
-          patches.push(createRemovePatch(["rootLayerIds"], layerId, rootIndex));
-        } else {
-          for (const [parentId, parent] of Object.entries(doc.layers)) {
-            if (parent.type === "group" && parent.children.includes(layerId)) {
-              const childIndex = parent.children.indexOf(layerId);
-              patches.push(
-                createRemovePatch(
-                  ["layers", parentId, "children"],
-                  layerId,
-                  childIndex
-                )
-              );
-            }
-          }
-        }
-      }
-    }
-
-    await this.applyPatches(patches);
-    this.selectLayers([]);
-  }
-
-  async moveSelectedLayers(delta: Vector2D): Promise<void> {
-    if (!this.state.currentDocument || this.state.selectedLayerIds.length === 0)
-      return;
-
-    const patches: Patch[] = [];
-    const doc = this.state.currentDocument;
-
-    for (const layerId of this.state.selectedLayerIds) {
-      const layer = doc.layers[layerId];
-      if (layer) {
-        patches.push(
-          createReplacePatch(
-            ["layers", layerId, "x"],
-            layer.x + delta.x,
-            layer.x
-          ),
-          createReplacePatch(
-            ["layers", layerId, "y"],
-            layer.y + delta.y,
-            layer.y
-          )
-        );
-      }
-    }
-
-    await this.applyPatches(patches);
-  }
-
-  async undo(): Promise<void> {
-    if (this.undoStack.length === 0 || !this.currentDocumentId) return;
-
-    const lastAction = this.undoStack[this.undoStack.length - 1];
-    if (lastAction.inversePatches.length === 0) {
-      lastAction.inversePatches = calculateInversePatches(
-        this.state.currentDocument!,
-        lastAction.patches
-      );
-    }
-
-    const newDoc = applyPatches(
-      this.state.currentDocument!,
-      lastAction.inversePatches
-    );
-
-    this.state.currentDocument = {
-      ...newDoc,
-      version: newDoc.version + 1,
-      updatedAt: new Date(),
+  // ======================
+  // Public API
+  // ======================
+  subscribe(subscriber: Subscriber): Unsubscribe {
+    this.subscribers.push(subscriber);
+    subscriber(this.getState());
+    return () => {
+      this.subscribers = this.subscribers.filter((sub) => sub !== subscriber);
     };
-
-    this._redoStack.push({
-      patches: lastAction.inversePatches,
-      inversePatches: lastAction.patches,
-    });
-    this._undoStack.pop();
-
-    await saveDocument(this.state.currentDocument);
-    await saveHistory(
-      this.currentDocumentId,
-      this.state.currentDocument.version,
-      lastAction.inversePatches
-    );
-
-    this.notifySubscribers();
-  }
-
-  async redo(): Promise<void> {
-    if (this.redoStack.length === 0 || !this.currentDocumentId) return;
-
-    const nextAction = this.redoStack[this.redoStack.length - 1];
-    const newDoc = applyPatches(
-      this.state.currentDocument!,
-      nextAction.patches
-    );
-
-    this.state.currentDocument = {
-      ...newDoc,
-      version: newDoc.version + 1,
-      updatedAt: new Date(),
-    };
-
-    this._undoStack.push({
-      patches: nextAction.patches,
-      inversePatches: nextAction.inversePatches,
-    });
-    this._redoStack.pop();
-
-    await saveDocument(this.state.currentDocument);
-    await saveHistory(
-      this.currentDocumentId,
-      this.state.currentDocument.version,
-      nextAction.patches
-    );
-
-    this.notifySubscribers();
-  }
-
-  selectLayers(ids: string[]): void {
-    this.state.selectedLayerIds = ids;
-    this.notifySubscribers();
-  }
-
-  setTool(tool: AppTool): void {
-    this.state.tool = tool;
-    this.notifySubscribers();
-  }
-
-  private notifySubscribers(): void {
-    const state = this.getState();
-    for (const sub of this.subscribers) {
-      sub(state);
-    }
-  }
-
-  subscribe(callback: (state: AppState) => void): () => void {
-    this.subscribers.add(callback);
-    callback(this.getState());
-    return () => this.subscribers.delete(callback);
   }
 
   getState(): AppState {
-    return { ...this.state };
+    return {
+      ...this.state,
+      currentDocument: this.state.currentDocument
+        ? documentManager.getDocument()
+        : null,
+      selectedLayerIds: documentManager.getSelectedLayersId(),
+    };
+  }
+
+  // ======================
+  // Document Management
+  // ======================
+  async createDocument(name: string, width?: number, height?: number) {
+    const doc = await createDocument(name, width, height);
+    this.setState({
+      currentDocument: doc,
+      selectedLayerIds: [],
+      canvas: { mode: CanvasMode.None },
+    });
+    return doc.id;
+  }
+
+  async loadDocument(documentId: string) {
+    const doc = await getDocumentByID(documentId);
+    if (doc) {
+      documentManager.loadDocument(doc);
+    }
+  }
+
+  async saveDocument() {
+    if (!this.state.currentDocument) return;
+    await saveDocument(this.state.currentDocument);
+  }
+
+  // ======================
+  // Tool & Selection
+  // ======================
+  setTool(tool: AppTool) {
+    if (this.state.tool !== tool) {
+      this.setState({
+        tool,
+        canvas: { mode: CanvasMode.None },
+      });
+    }
+  }
+
+  setSelection(ids: string[]) {
+    documentManager.setSelection(ids);
+    this.notifySubscribers();
+  }
+
+  // ======================
+  // Canvas Interactions
+  // ======================
+  startInserting(layerType: LayerType, position: Vector2D) {
+    if (!this.state.currentDocument) return;
+
+    this.setState({
+      canvas: {
+        mode: CanvasMode.Inserting,
+        layerType,
+        initialPosition: this.screenToWorld(position),
+        currentPosition: this.screenToWorld(position),
+      },
+    });
+  }
+
+  updateInserting(currentPosition: Vector2D) {
+    if (this.state.canvas.mode !== CanvasMode.Inserting) return null;
+
+    const worldPos = this.screenToWorld(currentPosition);
+    const { initialPosition } = this.state.canvas;
+
+    this.setState({
+      canvas: {
+        ...this.state.canvas,
+        currentPosition: worldPos,
+      },
+    });
+
+    return {
+      x: Math.min(initialPosition.x, worldPos.x),
+      y: Math.min(initialPosition.y, worldPos.y),
+      width: Math.abs(worldPos.x - initialPosition.x),
+      height: Math.abs(worldPos.y - initialPosition.y),
+    };
+  }
+
+  async completeInserting() {
+    if (this.state.canvas.mode !== CanvasMode.Inserting) return;
+    if (!this.state.currentDocument) return;
+
+    const { initialPosition, currentPosition, layerType } = this.state.canvas;
+    if (!initialPosition || !currentPosition) return;
+
+    const bounds = {
+      x: Math.min(initialPosition.x, currentPosition.x),
+      y: Math.min(initialPosition.y, currentPosition.y),
+      width: Math.abs(currentPosition.x - initialPosition.x),
+      height: Math.abs(currentPosition.y - initialPosition.y),
+    };
+
+    if (bounds.width < 5 || bounds.height < 5) {
+      this.setState({ canvas: { mode: CanvasMode.None } });
+      return;
+    }
+
+    const layer = generateDefaultLayer(layerType, bounds);
+    documentManager.addLayer(layer);
+
+    this.setState({
+      canvas: { mode: CanvasMode.None },
+      currentDocument: documentManager.getDocument(),
+
+      tool: "select",
+    });
+    await this.saveDocument();
+  }
+
+  startDragging(position: Vector2D) {
+    const selectedIds = documentManager.getSelectedLayersId();
+    if (selectedIds.length === 0) return;
+
+    const originalLayers: Record<string, Layer> = {};
+    selectedIds.forEach((id) => {
+      const layer = documentManager.getLayerById(id);
+      if (layer) originalLayers[id] = layer;
+    });
+
+    this.setState({
+      canvas: {
+        mode: CanvasMode.Dragging,
+        origin: this.screenToWorld(position),
+        originalLayers,
+      },
+    });
+  }
+
+  updateDragging(currentPosition: Vector2D) {
+    if (this.state.canvas.mode !== CanvasMode.Dragging) return;
+
+    const worldPos = this.screenToWorld(currentPosition);
+    const delta = {
+      x: worldPos.x - this.state.canvas.origin.x,
+      y: worldPos.y - this.state.canvas.origin.y,
+    };
+
+    Object.entries(this.state.canvas.originalLayers).forEach(
+      ([id, original]) => {
+        documentManager.updateLayer(id, {
+          x: original.x + delta.x,
+          y: original.y + delta.y,
+        });
+      }
+    );
+  }
+
+  completeDragging() {
+    if (this.state.canvas.mode === CanvasMode.Dragging) {
+      this.setState({ canvas: { mode: CanvasMode.None } });
+    }
+  }
+
+  startResizing(layerId: string, handle: ResizingPosition) {
+    const layer = documentManager.getLayerById(layerId);
+    if (!layer) return;
+
+    this.setState({
+      canvas: {
+        mode: CanvasMode.Resizing,
+        layerId,
+        handlePosition: handle,
+        initialBounds: {
+          x: layer.x,
+          y: layer.y,
+          width: layer.width,
+          height: layer.height,
+        },
+      },
+    });
+  }
+
+  updateResizing(currentPosition: Vector2D) {
+    if (this.state.canvas.mode !== CanvasMode.Resizing) return;
+
+    const worldPos = this.screenToWorld(currentPosition);
+    const { layerId, handlePosition, initialBounds } = this.state.canvas;
+
+    const newBounds = { ...initialBounds };
+
+    if (handlePosition.includes("e")) {
+      newBounds.width = worldPos.x - initialBounds.x;
+    }
+    if (handlePosition.includes("w")) {
+      newBounds.width = initialBounds.width + (initialBounds.x - worldPos.x);
+      newBounds.x = worldPos.x;
+    }
+    if (handlePosition.includes("s")) {
+      newBounds.height = worldPos.y - initialBounds.y;
+    }
+    if (handlePosition.includes("n")) {
+      newBounds.height = initialBounds.height + (initialBounds.y - worldPos.y);
+      newBounds.y = worldPos.y;
+    }
+
+    if (newBounds.width < 5) newBounds.width = 5;
+    if (newBounds.height < 5) newBounds.height = 5;
+
+    documentManager.updateLayer(layerId, newBounds);
+  }
+
+  completeResizing() {
+    if (this.state.canvas.mode === CanvasMode.Resizing) {
+      this.setState({ canvas: { mode: CanvasMode.None } });
+    }
+  }
+
+  // ======================
+  // Viewport/Camera
+  // ======================
+  screenToWorld(screenPos: Vector2D): Vector2D {
+    return {
+      x: (screenPos.x - this.state.camera.x) / this.state.camera.zoom,
+      y: (screenPos.y - this.state.camera.y) / this.state.camera.zoom,
+    };
+  }
+
+  worldToScreen(worldPos: Vector2D): Vector2D {
+    return {
+      x: worldPos.x * this.state.camera.zoom + this.state.camera.x,
+      y: worldPos.y * this.state.camera.zoom + this.state.camera.y,
+    };
+  }
+
+  panCamera(delta: Vector2D) {
+    this.setState({
+      camera: {
+        ...this.state.camera,
+        x: this.state.camera.x + delta.x,
+        y: this.state.camera.y + delta.y,
+      },
+    });
+  }
+
+  zoomCamera(zoom: number, focusPoint?: Vector2D) {
+    const newZoom = Math.max(0.1, Math.min(10, zoom));
+
+    if (focusPoint) {
+      const worldPos = this.screenToWorld(focusPoint);
+      this.setState({
+        camera: {
+          zoom: newZoom,
+          x: focusPoint.x - worldPos.x * newZoom,
+          y: focusPoint.y - worldPos.y * newZoom,
+        },
+      });
+    } else {
+      this.setState({
+        camera: {
+          ...this.state.camera,
+          zoom: newZoom,
+        },
+      });
+    }
+  }
+
+  // ======================
+  // Undo/Redo
+  // ======================
+  async undo() {
+    if (documentManager.canUndo()) {
+      documentManager.undo();
+      this.setState({
+        currentDocument: documentManager.getDocument(),
+        canvas: { mode: CanvasMode.None },
+      });
+    }
+  }
+
+  async redo() {
+    if (documentManager.canRedo()) {
+      documentManager.redo();
+      this.setState({
+        currentDocument: documentManager.getDocument(),
+        canvas: { mode: CanvasMode.None },
+      });
+    }
+  }
+
+  canUndo(): boolean {
+    return documentManager.canUndo();
+  }
+
+  canRedo(): boolean {
+    return documentManager.canRedo();
+  }
+
+  // ======================
+  // Preferences
+  // ======================
+  toggleDarkMode() {
+    this.setState({
+      preferences: {
+        ...this.state.preferences,
+        darkMode: !this.state.preferences.darkMode,
+      },
+    });
+  }
+
+  setNudgeDistance(distance: number) {
+    this.setState({
+      preferences: {
+        ...this.state.preferences,
+        nudgeDistance: Math.max(0.1, distance),
+      },
+    });
+  }
+
+  toggleRulers() {
+    this.setState({
+      preferences: {
+        ...this.state.preferences,
+        showRulers: !this.state.preferences.showRulers,
+      },
+    });
   }
 }
 

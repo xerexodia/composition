@@ -14,7 +14,7 @@ const Room = ({
     (async () => {
       await loadDocument(roomId);
     })();
-  });
+  },[loadDocument,roomId]);
   return <div>{children}</div>;
 };
 

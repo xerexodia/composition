@@ -4,6 +4,7 @@ import { LayerType } from "../../../types";
 import Rectangle from "../Elements/Rectangle";
 import Ellipse from "../Elements/Ellipse";
 import Path from "../Elements/Path";
+import Text from "../Elements/Text";
 
 const LayerComponent = memo(({ id }: { id: string }) => {
   const { getLayerById } = useDesignStore();
@@ -14,17 +15,13 @@ const LayerComponent = memo(({ id }: { id: string }) => {
 
   switch (layer.type) {
     case LayerType.Rectangle:
-      return (
-       <Rectangle layer={layer}/>
-      );
+      return <Rectangle layer={layer} />;
     case LayerType.Path:
-      return (
-       <Path {...layer}/>
-      );
+      return <Path {...layer} />;
+    case LayerType.Text:
+      return <Text id={id} layer={layer} />;
     case LayerType.Ellipse:
-      return (
-       <Ellipse layer={layer}/>
-      );
+      return <Ellipse layer={layer} />;
 
     default:
       return null;

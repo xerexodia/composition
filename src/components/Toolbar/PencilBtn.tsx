@@ -10,7 +10,7 @@ const PencilBtn = ({
   isActive: boolean;
 }) => {
   return <IconBtn isActive={isActive} onClick={onClick}>
-    <PiPencil/>
+    <PiPencil size={20}/>
   </IconBtn>;
 };
 
